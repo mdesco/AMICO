@@ -25,8 +25,9 @@ methods
         obj.dIso      = [2.0 3.0] * 1E-3;
         obj.dPer      = linspace(0.1,1.0,10) * 1E-3;
         
-        obj.OUTPUT_names        = { 'ICVF', 'ISOVF' };
-        obj.OUTPUT_descriptions = {'Intra-cellular volume fraction', 'Isotropic volume fraction'};
+        obj.OUTPUT_names        = { 'ICVF', 'FW' };
+        obj.OUTPUT_descriptions = {'Intra-cellular volume fraction', ...
+                'Isotropic free-water volume fraction'};
 
         % set the parameters to fit it
         CONFIG.OPTIMIZATION.SPAMS_param.mode    = 2;
@@ -190,7 +191,8 @@ methods
         end
         end
         end
-        save_untouch_nii(niiY, 'dwi_fw_corrected.nii');
+        save_untouch_nii(niiY, fullfile(CONFIG.OUTPUT_path,'dwi_fw_corrected.nii'));
+        
         TIME = toc(TIME);
         fprintf( '   [ %.0fh %.0fm %.0fs ]\n', floor(TIME/3600), floor(mod(TIME/60,60)), mod(TIME,60) )
 
