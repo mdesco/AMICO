@@ -139,15 +139,18 @@ methods
         global CONFIG
         global niiSIGNAL niiMASK
         global KERNELS bMATRIX
-
+    
         % setup the output files
         MAPs         = zeros( [CONFIG.dim(1:3) numel(obj.OUTPUT_names)], 'single' );
         DIRs         = zeros( [CONFIG.dim(1:3) 3], 'single' );
         niiY = niiSIGNAL;
+        residual_map = zeros( CONFIG.dim(1:3) );
         
+        % number of unknown single-fiber atoms to estimate
         n1 = numel(obj.dPer);
+        % number of isotropic compartments to estimate
         n2 = numel(obj.dIso);
-
+        
         fprintf( '\n-> Fitting "%s" model to data:\n', obj.name );
         TIME = tic();
         for iz = 1:niiSIGNAL.hdr.dime.dim(4)
@@ -161,33 +164,75 @@ methods
             y = double( squeeze( niiSIGNAL.img(ix,iy,iz,:) ) ./ ( b0 + eps ) );
             y( y < 0 ) = 0; % [NOTE] this should not happen!
 
+            % y is the normalized signal, ndir x 1
+
             % find the MAIN DIFFUSION DIRECTION using DTI
             [ ~, ~, V ] = AMICO_FitTensor( y, bMATRIX );
             Vt = V(:,1);
             if ( Vt(2)<0 ), Vt = -Vt; end
 
+            % V is 3x1 vector representing main e-vector
+            
             % build the DICTIONARY
             [ i1, i2 ] = AMICO_Dir2idx( Vt );
             A = double( [ KERNELS.A1(CONFIG.scheme.dwi_idx,:,i1,i2) KERNELS.A2(CONFIG.scheme.dwi_idx,:) ] );
 
+            % [A] contains in teh first blocs, the single fiber atoms
+            % in the second block, the isotropic atoms
+            
             % fit AMICO
             y = y(CONFIG.scheme.dwi_idx);
             yy = [ 1 ; y ];
             AA = [ ones(1,size(A,2)) ; A ];
 
-            % estimate CSF partial volume and remove it
-            x = full( mexLasso( yy, AA, CONFIG.OPTIMIZATION.SPAMS_param ) );
+            % yy contains only the normalized signal and a dummy b0=1 image
+            % hence, adding a row of 1's at the beginning of the dico
             
+            % estimate CSF partial volume and remove it
+            % x are all the unknowns
+            x = full( mexLasso( yy, AA, CONFIG.OPTIMIZATION.SPAMS_param ) );
+                        
             % STORE results	
             DIRs(ix,iy,iz,:) = Vt; % fiber direction
 
+            % single fiber contributions. the first n1 components of x
             MAPs(ix,iy,iz,1) = sum( x(1:n1) ) / ( sum(x) + eps ); % intracellular volume fraction
 
-            MAPs(ix,iy,iz,2) = 1 - MAPs(ix,iy,iz,1); % isotropic volume fraction
-        
-            x(n1+1:end) = 0;
-            niiY.img(ix,iy,iz,CONFIG.scheme.dwi_idx) = AA(2:end,:)*x*b0;
+            % this is supposed to be the volume fraction
+            % sum( x(n1+1:end) ) / (sum(x) + eps) == 1.0 - MAPs(ix, iy, iz, 1)
+            
+            MAPs(ix,iy,iz,2) = 1.0 - MAPs(ix,iy,iz,1); % isotropic volume fraction
+            MAPs(ix,iy,iz,3) = sum( x(n1+1) ) / ( sum(x) + eps );
+            MAPs(ix,iy,iz,4) = sum( x(n1+2:end) ) / ( sum(x) + eps );
+
+            estimated_signal = AA(2:end,:)*x*b0;
+            original_signal = y*b0;
                         
+            xx = x;
+            xx(1:n1) = 0;
+            free_water = AA(2:end,:)*xx*b0;
+            %if x(n1+1:end) ~= 0 
+            residual = norm(original_signal(:)-estimated_signal(:))/norm(original_signal(:));
+            MAPs(ix,iy,iz,5) = residual;
+            
+            verbose = 0;
+            if verbose                              
+                if free_water(1) ~= 0
+                    fprintf('voxel (%d, %d, %d) - %f %f\n', ix, iy, iz, x(n1+1:end))
+                    fprintf('residual - %f\n', residual);            
+                    fprintf('fw - %f\n', free_water(1));
+                    disp(x')
+                end
+            end
+            
+            %end
+            % erase the coefficients in charge of isotropic compartments
+            x(n1+1:end) = 0;
+            FW_estimated_signal = AA(2:end,:)*x*b0;
+            % re-generate the free-water corrected DWI signal
+            signal_fw_corrected = original_signal - free_water;
+
+            niiY.img(ix,iy,iz,CONFIG.scheme.dwi_idx) = signal_fw_corrected;
         end
         end
         end
