@@ -144,6 +144,14 @@ methods
         MAPs         = zeros( [CONFIG.dim(1:3) numel(obj.OUTPUT_names)], 'single' );
         DIRs         = zeros( [CONFIG.dim(1:3) 3], 'single' );
         niiY = niiSIGNAL;
+        niiY2 = niiSIGNAL;
+        niiY3 = niiSIGNAL;
+        niiY4 = niiSIGNAL;
+        niiY5 = niiSIGNAL;
+        niiY6 = niiSIGNAL;
+        niiY7 = niiSIGNAL;
+
+        residual_map = zeros( CONFIG.dim(1:3) );
         
         % number of unknown single-fiber atoms to estimate
         n1 = numel(obj.dPer);
@@ -202,26 +210,82 @@ methods
             
             MAPs(ix,iy,iz,2) = 1.0 - MAPs(ix,iy,iz,1); % isotropic volume fraction
             MAPs(ix,iy,iz,3) = sum( x(n1+1) ) / ( sum(x) + eps );
-            MAPs(ix,iy,iz,4) = sum( x(n1+2) ) / ( sum(x) + eps );
+            MAPs(ix,iy,iz,4) = sum( x(n1+2:end) ) / ( sum(x) + eps );
 
             estimated_signal = AA(2:end,:)*x*b0;
             original_signal = y*b0;
-                                    
+                        
+            xx = x;
+            sum(xx);
+            
+            % fiber part off
+            xx(1:n1) = 0;
+            free_water = AA(2:end,:)*xx*b0;
+            tmp = xx(n1+1);
+            xx(n1+1) = 0;
+            free_water_csf = AA(2:end,:)*xx*b0;
+            xx(n1+1) = tmp;
+            xx(n1+2) = 0;
+            free_water_blood = AA(2:end,:)*xx*b0;
+            
             %if x(n1+1:end) ~= 0 
             residual = norm(original_signal(:)-estimated_signal(:))/norm(original_signal(:));
             MAPs(ix,iy,iz,5) = residual;
             
+            verbose = 0;
+            if verbose                              
+                if sum(x(n1:1:end)) >= 0.2
+                    sum(x(n1:1:end))
+                    original_signal'
+                    free_water'
+                    
+                    fprintf('voxel (%d, %d, %d) - %f %f\n', ix, iy, iz, x(n1+1:end))
+                    fprintf('residual - %f\n', residual);            
+                    fprintf('fw - %f\n', free_water(1));
+                    disp(x')
+                end
+            end
+            
             %end
             residual = original_signal(:)-estimated_signal(:);
+            % erase the coefficients in charge of isotropic compartments
+            tmp = x(n1+1);
+            % erase the FW blood component
+            x(n1+1) = 0;
+            FWblood_estimated_signal = AA(2:end,:)*x*b0;
+            % put back the blood component and erase the CSF
+            x(n1+1) = tmp;
+            x(n1+2) = 0;
+            FWcsf_estimated_signal = AA(2:end,:)*x*b0;
+            % erase both
             x(n1+1:end) = 0;            
-            FiberFraction_estimated = AA(2:end,:)*x*b0;
+            FiberFraction_estimated_only_signal = AA(2:end,:)*x*b0 + residual;
+            FiberFraction_estimated_signal = AA(2:end,:)*x*b0;
+            % re-generate the free-water corrected DWI signal
+            %signal_fw_corrected = original_signal - free_water;
+            %signal_blood_corrected = original_signal - free_water_blood;
+            %signal_csf_corrected = original_signal - free_water_csf;
 
-            niiY.img(ix,iy,iz,CONFIG.scheme.dwi_idx) = FiberFraction_estimated;
+            niiY.img(ix,iy,iz,CONFIG.scheme.dwi_idx) = estimated_signal;
+            niiY2.img(ix,iy,iz,CONFIG.scheme.dwi_idx) = FiberFraction_estimated_only_signal;
+            niiY3.img(ix,iy,iz,CONFIG.scheme.dwi_idx) = FiberFraction_estimated_signal;;
+            niiY4.img(ix,iy,iz,CONFIG.scheme.dwi_idx) = FWblood_estimated_signal;
+            niiY5.img(ix,iy,iz,CONFIG.scheme.dwi_idx) = FWcsf_estimated_signal;
+            niiY6.img(ix,iy,iz,CONFIG.scheme.dwi_idx) = FWblood_estimated_signal+residual;
+            niiY7.img(ix,iy,iz,CONFIG.scheme.dwi_idx) = FWcsf_estimated_signal+residual;
         end
         end
         end
-        save_untouch_nii(niiY, fullfile(CONFIG.OUTPUT_path,'dwi_fw_corrected.nii'));
-                
+        save_untouch_nii(niiY, fullfile(CONFIG.OUTPUT_path,'dwi_estimated.nii'));
+        save_untouch_nii(niiY2, fullfile(CONFIG.OUTPUT_path,'dwi_FiberComparment_only.nii'));
+        save_untouch_nii(niiY3, fullfile(CONFIG.OUTPUT_path,'dwi_FiberComparment_est.nii'));
+        save_untouch_nii(niiY4, fullfile(CONFIG.OUTPUT_path,'dwi_fw_blood_corrected.nii'));
+        save_untouch_nii(niiY5, fullfile(CONFIG.OUTPUT_path,'dwi_fw_csf_corrected.nii'));
+        save_untouch_nii(niiY6, fullfile(CONFIG.OUTPUT_path,'dwi_fw_blood_corrected_r.nii'));
+        save_untouch_nii(niiY7, fullfile(CONFIG.OUTPUT_path,'dwi_fw_csf_corrected_r.nii'));
+
+        
+        
         TIME = toc(TIME);
         fprintf( '   [ %.0fh %.0fm %.0fs ]\n', floor(TIME/3600), floor(mod(TIME/60,60)), mod(TIME,60) )
 
